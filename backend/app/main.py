@@ -1,9 +1,8 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-
-from app.database import engine, SessionLocal
+from app.database import Base, engine, SessionLocal
 from app.auth import hash_password, verify_password
-from app.models import User
+from app.models import User, Product
 from app.schemas import UserCreate, UserLogin
 
 
@@ -11,6 +10,7 @@ app = FastAPI(
     title="Product Warranty Claim Processing Platform API",
     version="1.0.0"
 )
+Base.metadata.create_all(bind=engine)
 
 
 # Database connection check
