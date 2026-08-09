@@ -22,3 +22,11 @@ class Product(Base):
     warranty_period = Column(Integer, nullable=False)
     user_id = Column(Integer, nullable=False)
     
+class WarrantyClaim(Base):
+    __tablename__ = "warranty_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=False)
+    claim_reason = Column(String(500), nullable=False)
+    claim_status = Column(String(30), default="pending")
