@@ -1,25 +1,32 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.database import Base, engine, SessionLocal
 from app.auth import hash_password, verify_password
 from app.models import User, Product, WarrantyClaim
-from app.schemas import UserCreate, UserLogin, ProductCreate, ProductUpdate, WarrantyClaimCreate
 from app.schemas import (
     UserCreate,
+    UserLogin,
     ProductCreate,
     ProductUpdate,
     WarrantyClaimCreate,
     WarrantyClaimStatusUpdate
 )
 
+
 app = FastAPI(
     title="Product Warranty Claim Processing Platform API",
     version="1.0.0"
 )
+
+
 Base.metadata.create_all(bind=engine)
 
 
+# -----------------------------
 # Database connection check
+# -----------------------------
+
 @app.on_event("startup")
 def startup():
     try:
@@ -30,7 +37,10 @@ def startup():
         print(f"❌ Database connection failed: {e}")
 
 
+# -----------------------------
 # Database session
+# -----------------------------
+
 def get_db():
     db = SessionLocal()
     try:
@@ -39,7 +49,10 @@ def get_db():
         db.close()
 
 
+# -----------------------------
 # Root API
+# -----------------------------
+
 @app.get("/")
 def root():
     return {
@@ -47,26 +60,27 @@ def root():
     }
 
 
-# Register user
+# -----------------------------
+# Register User
+# -----------------------------
+
 @app.post("/register")
 def register_user(
     user: UserCreate,
     db: Session = Depends(get_db)
 ):
-    # Check whether email already exists
     existing_user = db.query(User).filter(
         User.email == user.email
     ).first()
 
     if existing_user:
-        return {
-            "message": "Email already registered"
-        }
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
 
-    # Hash password
     hashed_password = hash_password(user.password)
 
-    # Create new user
     new_user = User(
         full_name=user.full_name,
         email=user.email,
@@ -80,37 +94,39 @@ def register_user(
 
     return {
         "message": "User registered successfully",
-        "full_name": user.full_name,
-        "email": user.email,
-        "role": user.role
+        "full_name": new_user.full_name,
+        "email": new_user.email,
+        "role": new_user.role
     }
 
 
-# Login user
+# -----------------------------
+# Login User
+# -----------------------------
+
 @app.post("/login")
 def login_user(
     user: UserLogin,
     db: Session = Depends(get_db)
 ):
-    # Find user by email
     existing_user = db.query(User).filter(
         User.email == user.email
     ).first()
 
-    # Check email
     if not existing_user:
-        return {
-            "message": "Invalid email or password"
-        }
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
 
-    # Check password
     if not verify_password(
         user.password,
         existing_user.password
     ):
-        return {
-            "message": "Invalid email or password"
-        }
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
 
     return {
         "message": "Login successful",
@@ -118,12 +134,39 @@ def login_user(
         "email": existing_user.email,
         "role": existing_user.role
     }
-    
+
+
+# -----------------------------
+# Create Product
+# -----------------------------
+
 @app.post("/products")
 def create_product(
     product: ProductCreate,
     db: Session = Depends(get_db)
 ):
+    # Check whether user exists
+    user = db.query(User).filter(
+        User.id == product.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # Check duplicate product code
+    existing_product = db.query(Product).filter(
+        Product.product_code == product.product_code
+    ).first()
+
+    if existing_product:
+        raise HTTPException(
+            status_code=400,
+            detail="Product code already exists"
+        )
+
     new_product = Product(
         product_name=product.product_name,
         product_code=product.product_code,
@@ -140,24 +183,47 @@ def create_product(
         "message": "Product created successfully",
         "product_id": new_product.id,
         "product_name": new_product.product_name,
-        "product_code": new_product.product_code
+        "product_code": new_product.product_code,
+        "user_id": new_product.user_id
     }
-@app.get("/products")
-def get_products(db: Session = Depends(get_db)):
-    products = db.query(Product).all()
 
-    return products
+
+# -----------------------------
+# Get All Products
+# -----------------------------
+
+@app.get("/products")
+def get_products(
+    db: Session = Depends(get_db)
+):
+    return db.query(Product).all()
+
+
+# -----------------------------
+# Get Product By ID
+# -----------------------------
 
 @app.get("/products/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def get_product(
+    product_id: int,
+    db: Session = Depends(get_db)
+):
+    product = db.query(Product).filter(
+        Product.id == product_id
+    ).first()
 
     if not product:
-        return {
-            "message": "Product not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
 
     return product
+
+
+# -----------------------------
+# Update Product
+# -----------------------------
 
 @app.put("/products/{product_id}")
 def update_product(
@@ -170,9 +236,22 @@ def update_product(
     ).first()
 
     if not existing_product:
-        return {
-            "message": "Product not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Check duplicate product code
+    duplicate_product = db.query(Product).filter(
+        Product.product_code == product.product_code,
+        Product.id != product_id
+    ).first()
+
+    if duplicate_product:
+        raise HTTPException(
+            status_code=400,
+            detail="Product code already exists"
+        )
 
     existing_product.product_name = product.product_name
     existing_product.product_code = product.product_code
@@ -186,7 +265,12 @@ def update_product(
         "message": "Product updated successfully",
         "product": existing_product
     }
-    
+
+
+# -----------------------------
+# Delete Product
+# -----------------------------
+
 @app.delete("/products/{product_id}")
 def delete_product(
     product_id: int,
@@ -197,9 +281,21 @@ def delete_product(
     ).first()
 
     if not product:
-        return {
-            "message": "Product not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Check whether product has warranty claims
+    existing_claim = db.query(WarrantyClaim).filter(
+        WarrantyClaim.product_id == product_id
+    ).first()
+
+    if existing_claim:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete product because warranty claims exist"
+        )
 
     db.delete(product)
     db.commit()
@@ -208,11 +304,38 @@ def delete_product(
         "message": "Product deleted successfully"
     }
 
+
+# -----------------------------
+# Create Warranty Claim
+# -----------------------------
+
 @app.post("/claims")
 def create_claim(
     claim: WarrantyClaimCreate,
     db: Session = Depends(get_db)
 ):
+    # Check user
+    user = db.query(User).filter(
+        User.id == claim.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # Check product
+    product = db.query(Product).filter(
+        Product.id == claim.product_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
     new_claim = WarrantyClaim(
         product_id=claim.product_id,
         user_id=claim.user_id,
@@ -232,26 +355,44 @@ def create_claim(
         "claim_reason": new_claim.claim_reason,
         "claim_status": new_claim.claim_status
     }
-    
+
+
+# -----------------------------
+# Get All Claims
+# -----------------------------
 
 @app.get("/claims")
-def get_claims(db: Session = Depends(get_db)):
-    claims = db.query(WarrantyClaim).all()
+def get_claims(
+    db: Session = Depends(get_db)
+):
+    return db.query(WarrantyClaim).all()
 
-    return claims
+
+# -----------------------------
+# Get Claim By ID
+# -----------------------------
 
 @app.get("/claims/{claim_id}")
-def get_claim(claim_id: int, db: Session = Depends(get_db)):
+def get_claim(
+    claim_id: int,
+    db: Session = Depends(get_db)
+):
     claim = db.query(WarrantyClaim).filter(
         WarrantyClaim.id == claim_id
     ).first()
 
     if not claim:
-        return {
-            "message": "Warranty claim not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Warranty claim not found"
+        )
 
     return claim
+
+
+# -----------------------------
+# Update Claim Status
+# -----------------------------
 
 @app.put("/claims/{claim_id}/status")
 def update_claim_status(
@@ -264,9 +405,22 @@ def update_claim_status(
     ).first()
 
     if not claim:
-        return {
-            "message": "Warranty claim not found"
-        }
+        raise HTTPException(
+            status_code=404,
+            detail="Warranty claim not found"
+        )
+
+    allowed_statuses = [
+        "pending",
+        "approved",
+        "rejected"
+    ]
+
+    if status.claim_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid claim status. Use pending, approved, or rejected"
+        )
 
     claim.claim_status = status.claim_status
 
