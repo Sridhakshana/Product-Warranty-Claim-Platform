@@ -1,0 +1,3 @@
+Invoice No: INV-1001
+Total: Rs. 45000
+Date: 2025-01-15
